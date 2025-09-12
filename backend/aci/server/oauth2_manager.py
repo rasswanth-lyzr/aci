@@ -24,6 +24,9 @@ class OAuth2Manager:
         access_token_url: str,
         refresh_token_url: str,
         token_endpoint_auth_method: str | None = None,
+        include_client_credentials_in_token_request: bool = True,
+        include_scope_in_token_request: bool = True,
+        include_scope_in_authorization_request: bool = True,
     ):
         """
         Initialize the OAuth2Manager
@@ -39,6 +42,9 @@ class OAuth2Manager:
             token_endpoint_auth_method:
                 client_secret_basic (default) | client_secret_post | none
                 Additional options can be achieved by registering a custom auth method
+            include_client_credentials_in_token_request: Whether to include client_id/client_secret in token request
+            include_scope_in_token_request: Whether to include scope in token request
+            include_scope_in_authorization_request: Whether to include scope in authorization request
         """
         self.app_name = app_name
         self.client_id = client_id
@@ -48,18 +54,38 @@ class OAuth2Manager:
         self.access_token_url = access_token_url
         self.refresh_token_url = refresh_token_url
         self.token_endpoint_auth_method = token_endpoint_auth_method
+        self.include_client_credentials_in_token_request = (
+            include_client_credentials_in_token_request
+        )
+        self.include_scope_in_token_request = include_scope_in_token_request
+        self.include_scope_in_authorization_request = include_scope_in_authorization_request
 
         # TODO: need to close the client after use
         # Add an aclose() helper (or implement __aenter__/__aexit__) and make callers invoke it during shutdown.
         # NOTE: don't pass in scope here, otherwise it will be sent during refresh token request which is not needed
-        self.oauth2_client = AsyncOAuth2Client(
-            client_id=client_id,
-            client_secret=client_secret,
-            token_endpoint_auth_method=token_endpoint_auth_method,
-            code_challenge_method="S256",  # only S256 is supported
+
+        # Prepare client initialization parameters
+        client_params = {
+            "code_challenge_method": "S256",  # only S256 is supported
             # TODO: use update_token callback to save tokens to the database
-            update_token=None,
-        )
+            "update_token": None,
+        }
+
+        # Conditionally include client credentials based on configuration
+        if self.include_client_credentials_in_token_request:
+            client_params.update(
+                {
+                    "client_id": client_id,
+                    "client_secret": client_secret,
+                    "token_endpoint_auth_method": token_endpoint_auth_method,
+                }
+            )
+        else:
+            # Some OAuth2 providers don't require client credentials in token requests
+            # but we still need them for authorization
+            client_params["client_id"] = client_id
+
+        self.oauth2_client = AsyncOAuth2Client(**client_params)
 
     # TODO: some app may not support "code_verifier"?
     async def create_authorization_url(
@@ -98,16 +124,23 @@ class OAuth2Manager:
         # - "scope" can be specified here
         # - "response_type" can be specified here (default is "code")
         # - and additional options can be specified here (like access_type, prompt, etc.)
-        authorization_url, _ = self.oauth2_client.create_authorization_url(
-            url=self.authorize_url,
-            redirect_uri=redirect_uri,
-            state=state,
-            code_verifier=code_verifier,
-            access_type=access_type,
-            prompt=prompt,
-            scope=self.scope,
-            **app_specific_params,
-        )
+        auth_params = {
+            "url": self.authorize_url,
+            "redirect_uri": redirect_uri,
+            "state": state,
+            "code_verifier": code_verifier,
+            "access_type": access_type,
+            "prompt": prompt,
+        }
+
+        # Conditionally include scope based on configuration
+        if self.include_scope_in_authorization_request:
+            auth_params["scope"] = self.scope
+
+        # Add app-specific parameters
+        auth_params.update(app_specific_params)
+
+        authorization_url, _ = self.oauth2_client.create_authorization_url(**auth_params)
 
         return str(authorization_url)
 
@@ -130,15 +163,24 @@ class OAuth2Manager:
             Token response dictionary
         """
         try:
+            token_params = {
+                "url": self.access_token_url,
+                "redirect_uri": redirect_uri,
+                "code": code,
+                "code_verifier": code_verifier,
+            }
+
+            # Conditionally include scope based on configuration
+            if self.include_scope_in_token_request:
+                token_params["scope"] = self.scope
+
+            if self.include_client_credentials_in_token_request:
+                token_params["client_id"] = self.client_id
+                token_params["client_secret"] = self.client_secret
+
             token = cast(
                 dict[str, Any],
-                await self.oauth2_client.fetch_token(
-                    self.access_token_url,
-                    redirect_uri=redirect_uri,
-                    code=code,
-                    code_verifier=code_verifier,
-                    scope=self.scope,
-                ),
+                await self.oauth2_client.fetch_token(**token_params),
             )
             return token
         except Exception as e:
@@ -149,12 +191,19 @@ class OAuth2Manager:
         self,
         refresh_token: str,
     ) -> dict[str, Any]:
+        token_params = {
+            "url": self.refresh_token_url,
+            "refresh_token": refresh_token,
+        }
+
+        if self.include_client_credentials_in_token_request:
+            token_params["client_id"] = self.client_id
+            token_params["client_secret"] = self.client_secret
+
         try:
             token = cast(
                 dict[str, Any],
-                await self.oauth2_client.refresh_token(
-                    self.refresh_token_url, refresh_token=refresh_token
-                ),
+                await self.oauth2_client.refresh_token(**token_params),
             )
             return token
         except Exception as e:

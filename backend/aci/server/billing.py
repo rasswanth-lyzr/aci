@@ -13,7 +13,7 @@ logger = get_logger(__name__)
 def get_active_plan_by_org_id(db_session: Session, org_id: UUID) -> Plan:
     subscription = crud.subscriptions.get_subscription_by_org_id(db_session, org_id)
     if not subscription:
-        active_plan = crud.plans.get_by_name(db_session, "free")
+        active_plan = crud.plans.get_by_name(db_session, "team")
     else:
         active_plan = crud.plans.get_by_id(db_session, subscription.plan_id)
 

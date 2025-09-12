@@ -91,7 +91,7 @@ async def _get_oauth2_credentials(
     If the access token is expired, it will be refreshed.
     """
     is_updated = False
-    oauth2_scheme = get_app_configuration_oauth2_scheme(app_configuration.app, app_configuration)
+    oauth2_scheme = get_app_configuration_oauth2_scheme(app, app_configuration)
     oauth2_scheme_credentials = OAuth2SchemeCredentials.model_validate(
         linked_account.security_credentials
     )
@@ -157,6 +157,9 @@ async def _refresh_oauth2_access_token(
         access_token_url=oauth2_scheme.access_token_url,
         refresh_token_url=oauth2_scheme.refresh_token_url,
         token_endpoint_auth_method=oauth2_scheme.token_endpoint_auth_method,
+        include_client_credentials_in_token_request=oauth2_scheme.include_client_credentials_in_token_request,
+        include_scope_in_token_request=oauth2_scheme.include_scope_in_token_request,
+        include_scope_in_authorization_request=oauth2_scheme.include_scope_in_authorization_request,
     )
 
     return await oauth2_manager.refresh_token(refresh_token)
@@ -231,8 +234,13 @@ def get_app_configuration_oauth2_scheme(
 
     # Apply oauth2 overrides if they exist
     if security_scheme_overrides.oauth2:
-        oauth2_scheme = oauth2_scheme.model_copy(
-            update=security_scheme_overrides.oauth2.model_dump(exclude_none=True)
-        )
+        # Only update fields that are provided (not None)
+        override_data = {}
+        for field, value in security_scheme_overrides.oauth2.model_dump(exclude_none=True).items():
+            if value is not None:
+                override_data[field] = value
+
+        if override_data:
+            oauth2_scheme = oauth2_scheme.model_copy(update=override_data)
 
     return oauth2_scheme

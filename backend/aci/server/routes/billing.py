@@ -52,7 +52,7 @@ async def get_subscription(
             extra={"org_id": org_id},
         )
         return SubscriptionPublic(
-            plan="free",
+            plan="team",
             status=StripeSubscriptionStatus.ACTIVE,
         )
 

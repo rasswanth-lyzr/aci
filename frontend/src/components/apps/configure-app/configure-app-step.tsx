@@ -35,10 +35,58 @@ import { useCreateAppConfig } from "@/hooks/use-app-config";
 import { toast } from "sonner";
 import { AppAlreadyConfiguredError } from "@/lib/api/appconfig";
 
+// Configuration for apps that need custom OAuth2 URL fields
+const APPS_WITH_CUSTOM_OAUTH2_URLS = {
+  SALESFORCE: {
+    name: "Salesforce",
+    fields: [
+      {
+        key: "authorize_url",
+        label: "OAuth2 Authorization URL",
+        placeholder:
+          "https://your-instance.my.salesforce.com/services/oauth2/authorize",
+        description:
+          "The OAuth2 authorization URL for your Salesforce instance",
+      },
+      {
+        key: "access_token_url",
+        label: "OAuth2 Access Token URL",
+        placeholder:
+          "https://your-instance.my.salesforce.com/services/oauth2/token",
+        description: "The OAuth2 access token URL for your Salesforce instance",
+      },
+      {
+        key: "refresh_token_url",
+        label: "OAuth2 Refresh Token URL",
+        placeholder:
+          "https://your-instance.my.salesforce.com/services/oauth2/token",
+        description:
+          "The OAuth2 refresh token URL for your Salesforce instance",
+      },
+    ],
+  },
+  // Easy to add more apps here
+  // JIRA: {
+  //   name: "Jira",
+  //   fields: [
+  //     {
+  //       key: "authorize_url",
+  //       label: "OAuth2 Authorization URL",
+  //       placeholder: "https://auth.atlassian.com/authorize?audience=api.atlassian.com&response_type=code&prompt=consent",
+  //       description: "The OAuth2 authorization URL for your Jira instance"
+  //     }
+  //   ]
+  // }
+} as const;
+
 export const ConfigureAppFormSchema = z.object({
   security_scheme: z.string().min(1, "Security Scheme is required"),
   client_id: z.string().optional().default(""),
   client_secret: z.string().optional().default(""),
+  // Add new OAuth2 URL fields
+  authorize_url: z.string().optional().default(""),
+  access_token_url: z.string().optional().default(""),
+  refresh_token_url: z.string().optional().default(""),
   redirect_url: z
     .string()
     .optional()
@@ -95,6 +143,9 @@ export function ConfigureAppStep({
       security_scheme: Object.keys(supported_security_schemes || {})[0],
       client_id: "",
       client_secret: "",
+      authorize_url: "",
+      access_token_url: "",
+      refresh_token_url: "",
       redirect_url: "",
     },
   });
@@ -121,11 +172,36 @@ export function ConfigureAppStep({
   const effectiveRedirectUrl = redirectUrl || defaultRedirectUrl;
   const isUsingCustomRedirectUrl = !!redirectUrl;
 
+  // Check if current app needs custom OAuth2 URL fields
+  const appConfig =
+    APPS_WITH_CUSTOM_OAUTH2_URLS[
+      name as keyof typeof APPS_WITH_CUSTOM_OAUTH2_URLS
+    ];
+  const needsCustomOAuth2Urls = !!appConfig;
+
   const isFormValid = () => {
     if (currentSecurityScheme === "oauth2" && !useACIDevOAuth2) {
       const redirectUrlConfirmed = isUsingCustomRedirectUrl
         ? isRedirectUrlAdditionConfirmed && isRedirectUrlForwardingConfirmed
         : isRedirectUrlAdditionConfirmed;
+
+      // For apps with custom OAuth2 URLs, validate that required fields are filled
+      if (needsCustomOAuth2Urls) {
+        const hasRequiredUrls = appConfig.fields.every((field) => {
+          const value = form.getValues(
+            field.key as keyof ConfigureAppFormValues,
+          );
+          return typeof value === "string" && value.trim().length > 0;
+        });
+
+        return (
+          !!clientId &&
+          !!clientSecret &&
+          redirectUrlConfirmed &&
+          isScopeConfirmed &&
+          hasRequiredUrls
+        );
+      }
 
       return (
         !!clientId && !!clientSecret && redirectUrlConfirmed && isScopeConfirmed
@@ -139,6 +215,9 @@ export function ConfigureAppStep({
     if (currentSecurityScheme !== "oauth2") {
       form.setValue("client_id", "");
       form.setValue("client_secret", "");
+      form.setValue("authorize_url", "");
+      form.setValue("access_token_url", "");
+      form.setValue("refresh_token_url", "");
       form.setValue("redirect_url", "");
       setUseACIDevOAuth2(false);
       setIsRedirectUrlAdditionConfirmed(false);
@@ -160,6 +239,28 @@ export function ConfigureAppStep({
         });
         return;
       }
+
+      // Validate custom OAuth2 URLs for apps that need them
+      if (needsCustomOAuth2Urls) {
+        appConfig.fields.forEach((field) => {
+          const value = values[field.key as keyof ConfigureAppFormValues];
+          if (
+            !value ||
+            typeof value !== "string" ||
+            value.trim().length === 0
+          ) {
+            form.setError(field.key as keyof ConfigureAppFormValues, {
+              type: "manual",
+              message: `${field.label} is required for ${appConfig.name}`,
+            });
+          }
+        });
+
+        // Check if there are any errors
+        if (Object.keys(form.formState.errors).length > 0) {
+          return;
+        }
+      }
     }
 
     try {
@@ -177,6 +278,12 @@ export function ConfigureAppStep({
             client_secret: values.client_secret,
             ...(values.redirect_url && {
               redirect_url: values.redirect_url,
+            }),
+            // Add custom OAuth2 URL overrides if the app needs them
+            ...(needsCustomOAuth2Urls && {
+              authorize_url: values.authorize_url,
+              access_token_url: values.access_token_url,
+              refresh_token_url: values.refresh_token_url,
             }),
           },
         };
@@ -293,6 +400,40 @@ export function ConfigureAppStep({
                     </FormItem>
                   )}
                 />
+
+                {/* Custom OAuth2 URL fields for specific apps */}
+                {needsCustomOAuth2Urls &&
+                  appConfig.fields.map((field) => (
+                    <FormField
+                      key={field.key}
+                      control={form.control}
+                      name={field.key as keyof ConfigureAppFormValues}
+                      render={({ field: formField }) => (
+                        <FormItem>
+                          <FormLabel className="flex items-center gap-1">
+                            {field.label}
+                            <BsAsterisk className="h-2 w-2 text-red-500" />
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <BsQuestionCircle className="h-4 w-4 text-muted-foreground cursor-pointer" />
+                              </TooltipTrigger>
+                              <TooltipContent className="max-w-xs">
+                                {field.description}
+                              </TooltipContent>
+                            </Tooltip>
+                          </FormLabel>
+                          <FormControl>
+                            <Input
+                              {...formField}
+                              placeholder={field.placeholder}
+                              required
+                            />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                  ))}
 
                 {/* Custom Redirect URL Option */}
                 <FormField

@@ -79,6 +79,20 @@ class OAuth2Scheme(BaseModel):
     redirect_url: str | None = Field(
         default=None, min_length=1, max_length=2048, description="Redirect URL for OAuth2 callback."
     )
+    # OAuth2 flow configuration options
+    include_client_credentials_in_token_request: bool = Field(
+        default=True,
+        description="Whether to include client_id and client_secret in token request body. "
+        "Some OAuth2 providers require this, others don't.",
+    )
+    include_scope_in_token_request: bool = Field(
+        default=True,
+        description="Whether to include scope in token request. Some OAuth2 providers require this, others don't.",
+    )
+    include_scope_in_authorization_request: bool = Field(
+        default=True,
+        description="Whether to include scope in authorization request. Some OAuth2 providers require this, others don't.",
+    )
 
 
 # NOTE: need to show these fields for custom oauth2 app feature.
@@ -91,7 +105,7 @@ class OAuth2SchemePublic(BaseModel):
     )
 
 
-class OAuth2SchemeOverride(BaseModel):
+class OAuth2SchemeOverride(BaseModel, extra="forbid"):
     """
     Fields that are allowed to be overridden by the user.
     """
@@ -108,11 +122,25 @@ class OAuth2SchemeOverride(BaseModel):
         max_length=2048,
         description="The client secret of the OAuth2 client used for the app",
     )
-    # NOTE: for some OAuth2 app such as google apps, it will still show "ACI.dev" on the authorization page even if the user provides their own OAuth2 app.
-    # It's because the domains shown there is determined by the redirect URL.
-    # If user needs complete whitelabeling, they need to provide a custom redirect URL (and set it as redirect URL in their OAuth2 app)
-    # and forward the OAuth2 callback response to ACI.dev's callback endpoint.
-    # e.g, https://my-app.com/v1/linked-accounts/oauth2/callback (set as redirect URL in OAuth2 app) --forward--> https://api.aci.dev/v1/linked-accounts/oauth2/callback
+    # Add new fields for OAuth2 URLs
+    authorize_url: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=2048,
+        description="Custom OAuth2 authorization URL. If not provided, the app's default URL will be used.",
+    )
+    access_token_url: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=2048,
+        description="Custom OAuth2 access token URL. If not provided, the app's default URL will be used.",
+    )
+    refresh_token_url: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=2048,
+        description="Custom OAuth2 refresh token URL. If not provided, the app's default URL will be used.",
+    )
     redirect_url: str | None = Field(
         default=None,
         min_length=1,
@@ -122,13 +150,13 @@ class OAuth2SchemeOverride(BaseModel):
         "When user uses a custom redirect URL, their backend should forward the OAuth2 callback response to ACI.dev's callback endpoint.",
     )
 
-    @field_validator("redirect_url")
-    def validate_redirect_url(cls, v: str | None) -> str | None:
+    @field_validator("authorize_url", "access_token_url", "refresh_token_url", "redirect_url")
+    def validate_urls(cls, v: str | None) -> str | None:
         if v is None:
             return v
         # sanity check: must be http or https
         if not (v.startswith("http") or v.startswith("https")):
-            raise ValueError("Redirect URL must start with http or https")
+            raise ValueError("URLs must start with http or https")
         return v
 
     # TODO: might need to support "scope" in the future
