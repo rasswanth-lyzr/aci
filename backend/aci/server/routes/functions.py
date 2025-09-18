@@ -14,7 +14,6 @@ from aci.common.enums import FunctionDefinitionFormat, Visibility
 from aci.common.exceptions import (
     AppConfigurationDisabled,
     AppConfigurationNotFound,
-    AppNotAllowedForThisAgent,
     FunctionNotEnabledInAppConfiguration,
     FunctionNotFound,
     InvalidFunctionDefinitionFormat,
@@ -439,14 +438,14 @@ async def execute_function(
         )
 
     # Check if the function is allowed to be executed by the agent
-    if function.app.name not in agent.allowed_apps:
-        logger.error(
-            f"Failed to execute function, App not allowed to be used by this agent, "
-            f"function_name={function_name} app_name={function.app.name} agent_id={agent.id}"
-        )
-        raise AppNotAllowedForThisAgent(
-            f"App={function.app.name} that this function belongs to is not allowed to be used by agent={agent.name}"
-        )
+    # if function.app.name not in agent.allowed_apps:
+    #     logger.error(
+    #         f"Failed to execute function, App not allowed to be used by this agent, "
+    #         f"function_name={function_name} app_name={function.app.name} agent_id={agent.id}"
+    #     )
+    #     raise AppNotAllowedForThisAgent(
+    #         f"App={function.app.name} that this function belongs to is not allowed to be used by agent={agent.name}"
+    #     )
 
     if (
         not app_configuration.all_functions_enabled
